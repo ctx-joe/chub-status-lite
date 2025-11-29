@@ -1,21 +1,12 @@
-# Chub Status Bot Lite - Configuration
-# Copy this to config.yaml and fill in your values
-
-# Discord Bot
 discord:
   token: "YOUR_DISCORD_BOT_TOKEN"
-  # Optional: Restrict bot to specific guilds (leave empty for all guilds)
-  allowed_guilds: []
-  # allowed_guilds:
-  #   - 123456789012345678
+  allowed_guilds: []  # Optional: restrict to specific guild IDs
 
-# Status Monitor
 status:
   endpoint: "https://gateway.chub.ai/monitoring/health/public/status"
-  poll_interval_seconds: 10
-  history_depth: 10  # Number of status snapshots to display (10 = 50 min at 5-min intervals)
+  poll_interval_seconds: 60
+  history_depth: 10
 
-# Database
 database:
   path: "chub_bot.db"
   retention_days: 30

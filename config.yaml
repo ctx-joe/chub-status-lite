@@ -12,7 +12,7 @@ discord:
 # Status Monitor
 status:
   endpoint: "https://gateway.chub.ai/monitoring/health/public/status"
-  poll_interval_seconds: 10
+  poll_interval_seconds: 60
   history_depth: 10  # Number of status snapshots to display (10 = 50 min at 5-min intervals)
 
 # Database

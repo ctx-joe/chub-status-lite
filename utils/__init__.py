@@ -1,6 +1,4 @@
-"""
-Utility modules for Chub Status Bot Lite.
-"""
+"""Utilities package for Chub Status Lite."""
 
 from .database import Database
 from .chub_api import ChubAPIClient, ChubStatus, ModelStatus

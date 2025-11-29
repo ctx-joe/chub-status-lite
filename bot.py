@@ -1,212 +1,106 @@
 """
-Chub Status Bot Lite - Status monitoring only.
+Chub Status Lite - Discord bot for monitoring Chub.ai service status.
 
-A lightweight Discord bot for monitoring Chub.ai service status.
-No LLM capabilities - just status and stats.
-
-Run with: python bot.py
+A lightweight status monitoring bot with outage notifications.
 """
 
-import asyncio
+import discord
+from discord.ext import commands
+import yaml
 import logging
-import sys
+import asyncio
 from pathlib import Path
 
-import discord
-from discord.ext import commands, tasks
-import yaml
-
-from utils import Database, ChubAPIClient
-from cogs import StatusCog, StatsCog, SetupCog
-
-# Get script directory for relative paths
-SCRIPT_DIR = Path(__file__).parent.resolve()
+from utils import ChubAPIClient, Database
+from cogs.status import StatusCog
+from cogs.setup import SetupCog
+from cogs.stats import StatsCog
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(SCRIPT_DIR / 'bot.log', encoding='utf-8')
-    ]
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
-logger = logging.getLogger('chub_bot')
+logger = logging.getLogger(__name__)
 
 
 def load_config(path: str = "config.yaml") -> dict:
     """Load configuration from YAML file."""
-    config_path = SCRIPT_DIR / path
-    
-    if not config_path.exists():
-        config_path = Path(path)
-    
-    if not config_path.exists():
-        logger.error(f"Config file not found: {path}")
-        logger.info(f"Looked in: {SCRIPT_DIR}")
-        logger.info("Please copy config.yaml.example to config.yaml and fill in your values.")
-        sys.exit(1)
-    
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    # Validate required fields
-    if not config.get('discord', {}).get('token'):
-        logger.error("Missing required config: discord.token")
-        sys.exit(1)
-    
-    return config
+    with open(path, 'r') as f:
+        return yaml.safe_load(f)
 
 
-class ChubBotLite(commands.Bot):
-    """Lightweight bot for status monitoring only."""
+async def main():
+    """Main entry point."""
+    config = load_config()
     
-    def __init__(self, config: dict):
-        self.config = config
-        
-        # Set up intents
-        intents = discord.Intents.default()
-        intents.guilds = True
-        
-        super().__init__(
-            command_prefix="!",
-            intents=intents,
-            help_command=None
-        )
-        
-        # Guild whitelist (empty = allow all)
-        self.allowed_guilds = set(config.get('discord', {}).get('allowed_guilds', []) or [])
-        
-        # Initialize components
-        self.database: Database = None
-        self.chub_client: ChubAPIClient = None
+    # Set up intents
+    intents = discord.Intents.default()
+    intents.message_content = True
+    intents.guilds = True
+    intents.members = True  # Required for role management
     
-    async def setup_hook(self) -> None:
-        """Called when bot is starting up."""
-        logger.info("Initializing bot components...")
-        
-        if self.allowed_guilds:
-            logger.info(f"Guild whitelist enabled: {len(self.allowed_guilds)} guilds")
-        else:
-            logger.info("Guild whitelist disabled (allowing all guilds)")
-        
-        # Initialize database
-        db_config = self.config.get('database', {})
-        db_path = SCRIPT_DIR / db_config.get('path', 'chub_bot.db')
-        self.database = Database(
-            path=str(db_path),
-            retention_days=db_config.get('retention_days', 30)
-        )
-        await self.database.initialize()
-        logger.info("Database initialized")
-        
-        # Initialize Chub API client
-        status_config = self.config.get('status', {})
-        self.chub_client = ChubAPIClient(
-            endpoint=status_config.get('endpoint', 'https://gateway.chub.ai/monitoring/health/public/status')
-        )
-        logger.info("Chub API client initialized")
-        
-        # Load cogs
-        await self._load_cogs()
-        
-        # Start maintenance task
-        self.daily_maintenance.start()
+    # Create bot instance
+    bot = commands.Bot(
+        command_prefix="!",  # Prefix commands not used, but required
+        intents=intents,
+        help_command=None
+    )
     
-    async def _load_cogs(self) -> None:
-        """Load all cogs."""
-        status_config = self.config.get('status', {})
-        
-        # Status monitoring
-        status_cog = StatusCog(
-            bot=self,
-            chub_client=self.chub_client,
-            database=self.database,
-            poll_interval=status_config.get('poll_interval_seconds', 10),
-            history_depth=status_config.get('history_depth', 10)
-        )
-        await self.add_cog(status_cog)
-        
-        # Stats commands
-        stats_cog = StatsCog(bot=self, database=self.database)
-        await self.add_cog(stats_cog)
-        
-        # Setup commands
-        setup_cog = SetupCog(bot=self, database=self.database)
-        await self.add_cog(setup_cog)
-        
-        logger.info(f"Loaded {len(self.cogs)} cogs")
+    # Initialize shared resources
+    database = Database(config['database']['path'])
+    chub_client = ChubAPIClient(config['status']['endpoint'])
     
-    def is_guild_allowed(self, guild_id: int) -> bool:
-        """Check if a guild is in the whitelist."""
-        if not self.allowed_guilds:
-            return True
-        return guild_id in self.allowed_guilds
-    
-    async def on_ready(self) -> None:
-        """Called when bot is fully connected."""
-        logger.info(f"Logged in as {self.user} (ID: {self.user.id})")
-        logger.info(f"Connected to {len(self.guilds)} guilds")
-        
-        if self.allowed_guilds:
-            for guild in self.guilds:
-                status = "✓ allowed" if self.is_guild_allowed(guild.id) else "✗ blocked"
-                logger.info(f"  Guild: {guild.name} ({guild.id}) - {status}")
+    @bot.event
+    async def on_ready():
+        """Called when bot is ready."""
+        logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
+        logger.info(f"Connected to {len(bot.guilds)} guilds")
         
         # Sync slash commands
         try:
-            synced = await self.tree.sync()
-            logger.info(f"Synced {len(synced)} slash commands")
+            # Sync to specific guilds if configured
+            allowed_guilds = config['discord'].get('allowed_guilds', [])
+            if allowed_guilds:
+                for guild_id in allowed_guilds:
+                    guild = discord.Object(id=guild_id)
+                    bot.tree.copy_global_to(guild=guild)
+                    await bot.tree.sync(guild=guild)
+                logger.info(f"Synced commands to {len(allowed_guilds)} guilds")
+            else:
+                await bot.tree.sync()
+                logger.info("Synced commands globally")
         except Exception as e:
             logger.error(f"Failed to sync commands: {e}")
     
-    @tasks.loop(hours=24)
-    async def daily_maintenance(self) -> None:
-        """Daily database maintenance."""
-        if self.database is None:
-            logger.debug("Database not initialized yet, skipping maintenance")
-            return
-        
-        try:
-            results = await self.database.daily_maintenance()
-            logger.info(f"Daily maintenance: deleted {results['status_deleted']} status logs")
-        except Exception as e:
-            logger.error(f"Daily maintenance failed: {e}")
+    # Initialize database
+    await database.initialize()
     
-    @daily_maintenance.before_loop
-    async def before_daily_maintenance(self) -> None:
-        """Wait for bot to be ready."""
-        await self.wait_until_ready()
+    # Add cogs
+    status_cog = StatusCog(
+        bot=bot,
+        chub_client=chub_client,
+        database=database,
+        poll_interval=config['status'].get('poll_interval_seconds', 60),
+        history_depth=config['status'].get('history_depth', 10)
+    )
     
-    async def close(self) -> None:
-        """Clean shutdown."""
-        logger.info("Shutting down...")
-        
-        self.daily_maintenance.cancel()
-        
-        if self.chub_client:
-            await self.chub_client.close()
-        
-        if self.database:
-            await self.database.close()
-        
-        await super().close()
-        logger.info("Shutdown complete")
-
-
-async def main() -> None:
-    """Main entry point."""
-    config = load_config()
-    bot = ChubBotLite(config)
+    setup_cog = SetupCog(bot=bot, database=database)
+    stats_cog = StatsCog(bot=bot, database=database)
     
+    await bot.add_cog(status_cog)
+    await bot.add_cog(setup_cog)
+    await bot.add_cog(stats_cog)
+    
+    logger.info("All cogs loaded")
+    
+    # Run the bot
     try:
         await bot.start(config['discord']['token'])
-    except KeyboardInterrupt:
-        logger.info("Received interrupt signal")
     finally:
-        if not bot.is_closed():
-            await bot.close()
+        await database.close()
+        await chub_client.close()
 
 
 if __name__ == "__main__":

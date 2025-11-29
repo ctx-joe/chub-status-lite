@@ -26,7 +26,7 @@ class ModelStatus:
     @property
     def emoji(self) -> str:
         """Get status emoji."""
-        return {'green': '🟢', 'orange': '🟠', 'red': '🔴'}.get(self.health, '⚪')
+        return {'green': '🟢', 'yellow': '🟡', 'orange': '🟠', 'red': '🔴'}.get(self.health, '⚪')
 
 
 @dataclass
@@ -40,7 +40,7 @@ class ChubStatus:
     @property
     def api_emoji(self) -> str:
         """Get API status emoji."""
-        return {'green': '🟢', 'orange': '🟠', 'red': '🔴'}.get(self.api_health, '⚪')
+        return {'green': '🟢', 'yellow': '🟡', 'orange': '🟠', 'red': '🔴'}.get(self.api_health, '⚪')
     
     def get_model(self, name: str) -> Optional[ModelStatus]:
         """Get status for a specific model by name."""
@@ -103,31 +103,30 @@ class ChubAPIClient:
     def _parse_status(self, data: Dict[str, Any]) -> Optional[ChubStatus]:
         """Parse API response into ChubStatus object."""
         try:
-            # Get the most recent history entry
-            history = data.get('history', [])
-            if not history:
-                logger.warning("No history in status response")
+            # Use 'current' field for real-time status (not history[0] which is oldest)
+            current = data.get('current', {})
+            if not current:
+                logger.warning("No 'current' field in status response")
                 return None
             
-            latest = history[0]  # Most recent entry
-            
-            # Parse timestamp
-            timestamp_str = latest.get('updated', '')
+            # Parse timestamp (at root level, not inside current)
+            timestamp_str = data.get('updated', '')
             try:
                 timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
             except ValueError:
                 timestamp = datetime.utcnow()
             
-            # Parse API health
-            api_health = latest.get('api', 'unknown')
+            # Parse API health (api is nested inside current)
+            api_data = current.get('api', {})
+            api_health = api_data.get('health', 'unknown') if isinstance(api_data, dict) else 'unknown'
             
             # Parse model statuses in Chub's order
+            # Models are directly in current (not under 'inference')
             models = []
-            inference = latest.get('inference', {})
             
             for model_name in MODEL_ORDER:
-                if model_name in inference:
-                    model_data = inference[model_name]
+                if model_name in current:
+                    model_data = current[model_name]
                     if isinstance(model_data, dict):
                         # Handle timeout/fail as floats (they're percentages as decimals)
                         timeout_raw = model_data.get('timeout', 0)
@@ -139,7 +138,7 @@ class ChubAPIClient:
                         
                         models.append(ModelStatus(
                             name=model_name,
-                            health=model_data.get('health', 'unknown'),
+                            health=model_data.get('health') or 'unknown',
                             avg_latency=int(model_data.get('avg', 0)),
                             timeout_pct=timeout_pct,
                             fail_pct=fail_pct

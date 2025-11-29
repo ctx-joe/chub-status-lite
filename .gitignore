@@ -1,11 +1,3 @@
-# Config with secrets
-config.yaml
-
-# Database
-*.db
-*.db-wal
-*.db-shm
-
 # Python
 __pycache__/
 *.py[cod]
@@ -16,16 +8,25 @@ venv/
 .venv/
 ENV/
 
-# Logs
-*.log
-bot.log
+# Database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Config (contains secrets)
+config.yaml
 
 # IDE
-.vscode/
 .idea/
+.vscode/
 *.swp
 *.swo
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs
+*.log
+logs/
